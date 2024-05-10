@@ -9,6 +9,7 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.core.content.FileProvider
 import androidx.core.text.HtmlCompat
 import io.flutter.plugin.common.MethodCall
@@ -103,6 +104,7 @@ class FlutterEmailSenderPlugin
             FileProvider.getUriForFile(activity!!, activity!!.packageName + ".file_provider", File(it))
         }
 
+        val isSdk33Plus = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
         val intent = Intent()
 
         // We need a different intent action depending on the number of attachments.
@@ -112,7 +114,8 @@ class FlutterEmailSenderPlugin
         } else {
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
-            if (attachmentUris.size == 1) {
+            // On SDK >= 33 intent selector `Intent.ACTION_SENDTO` does not work properly
+            if (!isSdk33Plus && attachmentUris.size == 1) {
                 //https://github.com/sidlatau/flutter_email_sender/issues/91
                 // ACTION_SENDTO here does not work on some devices
                 intent.action = Intent.ACTION_SEND
@@ -167,10 +170,18 @@ class FlutterEmailSenderPlugin
 
         val packageManager = activity?.packageManager
 
-        if (packageManager?.resolveActivity(intent, 0) != null) {
+        // On SDK >= 33 only chooser intent displays proper emailing apps
+        if (!isSdk33Plus && packageManager?.resolveActivity(intent, 0) != null) {
             activity?.startActivityForResult(intent, REQUEST_CODE_SEND)
         } else {
-            callback.error("not_available", "No email clients found!", null)
+            // Fallback to use chooser intent, on SDK >= 33 previous call 
+            // doesn't find all the email clients 
+            val chooser = Intent.createChooser(intent, "Send email using...")
+            if (packageManager?.resolveActivity(chooser, 0) != null) {
+                activity?.startActivityForResult(chooser, REQUEST_CODE_SEND)
+            } else {
+                callback.error("not_available", "No email clients found!", null)
+            }
         }
     }
 
